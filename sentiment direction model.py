@@ -10,20 +10,6 @@ from preprocessing import load_and_preprocess
 def join_words(word_list):
     return ' '.join(word_list)
 
-def build_features(df, max_features=5000):
-    df['text_joined'] = df['cleaned_text'].apply(join_words)
-    df = df[df['text_joined'].str.strip() != '']
-    df = df[df['1_DAY_RETURN'].notna()]
-    
-    df['label'] = df['1_DAY_RETURN'].apply(lambda x: 1 if x > 0.01 else (-1 if x < -0.01 else 0))
-
-    vectorizer = TfidfVectorizer(max_features=max_features)
-    X = vectorizer.fit_transform(df['text_joined'])
-    y = df['label'].values
-    y_continuous = df['1_DAY_RETURN'].values
-
-    return X, y, y_continuous, vectorizer, df
-
 def tune_logistic(X, y):
     Cs = np.logspace(-3, 2, 6)
     model = LogisticRegression(max_iter=10000, solver='lbfgs', multi_class='multinomial', class_weight='balanced')
@@ -69,6 +55,28 @@ def plot_score_vs_return(scores, y_true_cont):
     for i, r in enumerate(avg_ret):
         print(f"Q{i}: {r:.6f}")
 
+def build_features(df, vectorizer=None, max_features=5000):
+    df['text_joined'] = df['cleaned_text']#.apply(join_words)
+    df = df[df['text_joined'].str.strip() != '']
+    df = df[df['1_DAY_RETURN'].notna()]
+    
+    df['label'] = df['1_DAY_RETURN'].apply(lambda x: 1 if x > 0.01 else (-1 if x < -0.01 else 0))
+
+    # If no vectorizer provided, create and fit one (training phase)
+    if vectorizer is None:
+        vectorizer = TfidfVectorizer(max_features=max_features)
+        X = vectorizer.fit_transform(df['text_joined'])
+    else:
+        # Use existing vectorizer (testing phase)
+        X = vectorizer.transform(df['text_joined'])
+    
+    y = df['label'].values
+    y_continuous = df['1_DAY_RETURN'].values
+
+    return X, y, y_continuous, vectorizer, df
+
+# ...existing code...
+
 def main():
     print("📦 读取并预处理数据...")
     df = load_and_preprocess("data/cleaned_aligned_data.csv")
@@ -90,8 +98,10 @@ def main():
             print(f"🚫 训练或测试数据太少，跳过 {stock}")
             continue
 
-        X_train, y_train, _, _, _ = build_features(train_df)
-        X_test, y_test, y_test_cont, _, _ = build_features(test_df)
+        # Fit vectorizer on training data only
+        X_train, y_train, _, vectorizer, _ = build_features(train_df)
+        # Apply fitted vectorizer to test data
+        X_test, y_test, y_test_cont, _, _ = build_features(test_df, vectorizer=vectorizer)
 
         print(f"✅ 训练样本数: {X_train.shape[0]}，测试样本数: {X_test.shape[0]}")
         model = tune_logistic(X_train, y_train)
